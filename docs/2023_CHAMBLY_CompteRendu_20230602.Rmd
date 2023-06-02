@@ -1,0 +1,228 @@
+---
+title: "Rapport des inventaires à Chambly, QC"
+author: "Habitat"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    
+    theme: journal          # check themes and colors here https://bootswatch.com/3/
+    highlight: pygment
+    #toc: true               # table of contents
+    toc_float: true         # floating toc
+    number_sections: true   # automatic section numbering
+    code_folding: hide      # fold code
+    code_download: false     # make .Rmd file available for download
+    css: custom.css         #Should be in same folder as the rmarkdown 
+knit: (function(inputFile, encoding) {
+          rmarkdown::render(inputFile, encoding = encoding,
+                            output_file = '2023_CHAMBLY_InvArbre.html',
+                            output_dir = 'G:\\Shared drives\\Projets\\Actif\\2023_CHAMBLY_InvArbre\\3-Analyses')}) # IMP -- Need to change where the file will be knitted locally 
+#runtime: shiny             # in case of shiny inclusion
+editor_options: 
+  chunk_output_type: inline            # in case of shiny inclusion
+---
+
+
+```{r include=TRUE, echo=FALSE}
+cur_dir = dirname(rstudioapi::getActiveDocumentContext()$path)
+parent_dir <- dirname(cur_dir)
+
+htmltools::img(src = 
+                 knitr::image_uri(paste0(cur_dir, "/H_compact_GREEN-YELLOW.jpg")), #Logo is obtained from the folder where the .rmd is stored
+               alt = 'logo', width="150", 
+               style = paste0('position:absolute; top:15px;', 
+                              'width: 50%; max-width: 150px; max-height: 85%;',
+                              'right:-20px; overflow: auto; padding:6px;'))
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+###LOAD LIBRARIES###
+
+library(tidyr)
+library(tidyverse)
+library(janitor)
+library(readxl)
+library(knitr)
+library(DT)
+library(xlsx)
+library(tidyr)
+library(stringr)
+library(sf)
+library(rgeos)
+library(raster)
+library(htmltools)
+
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+localPath<-getwd()
+projectCode<-"2023_CHAMBLY_InvArbre"
+
+stem_path<-str_split_fixed(localPath, projectCode, 2) %>% unlist %>% .[,1]
+
+#Path to Analysis Folder
+pathAnalyses=paste0(stem_path, projectCode,"/3-Analyses/")
+pathData<-paste0(stem_path, projectCode,"/3-Analyses/1-Data/")
+
+
+library(leaflet)
+
+###LOAD DATA####
+
+tree_inventory<-st_read(paste0(pathData, "TreeInventories/.cleaned/", 
+               "Inventory_CHAMBLY_20230602.gpkg"))
+
+full_inventory<-read.csv(paste0(pathData, "TreeInventories/.cleaned/", 
+               "Inventory_CHAMBLY_20230602.csv"), fileEncoding = "ISO-8859-1")
+
+emprise<-st_read(paste0(pathData, "Roads/emprises.shp")) %>% st_zm() %>%
+  st_transform(projection(tree_inventory))
+
+parcs<-st_read(paste0(pathData, "StudyRegion/parcs.shp")) %>% st_zm() %>%
+  st_transform(projection(tree_inventory))
+n_missing_id<-sum(is.na(parcs$NomParc))
+parcs[is.na(parcs$NomParc),]$NomParc<-paste("Espace vert", 1:n_missing_id)
+
+priorities<-st_read(paste0(pathData, "StudyRegion/priorities_20230605.shp")) %>%
+  st_zm() %>%
+  st_transform(projection(tree_inventory))
+centers <- st_centroid(priorities) %>% st_geometry() %>% st_coordinates() %>% as.data.frame() %>% mutate(subdistrict=priorities$subdistric)
+
+
+####DATA ANALYSIS####
+
+centroid_inventory<-st_convex_hull(st_union(tree_inventory)) %>% 
+  st_centroid() %>% 
+  st_coordinates()
+
+sf_use_s2(FALSE)
+emprise <- st_make_valid(emprise)
+emprise<-st_buffer(emprise, 0)
+priority_emprise<-st_intersection(priorities["id"], emprise["LBPA_ODO"]) %>%
+  dplyr::rename("name"="LBPA_ODO") %>% mutate(type="Emprise")
+priority_parc<-st_intersection(priorities["id"], parcs["NomParc"]) %>%
+  dplyr::rename("name"="NomParc") %>% mutate(type="Parc")
+
+priority_table<-rbind(priority_emprise, priority_parc) %>% st_drop_geometry
+
+high_priority<- priority_table %>% filter(grepl("BOULEVARD", name) | 
+                                            grepl("Parc", type) ) %>%
+  unique() %>%
+  dplyr::select(type, id, name) %>%
+  dplyr::rename("Type"="type", "Zone"="id", "Nom"="name")
+
+low_priority<- priority_table %>% filter(!(grepl("BOULEVARD", name) | 
+                                            grepl("Parc", type) )) %>%
+  unique() %>%
+  dplyr::select(type, id, name) %>%
+  dplyr::rename("Type"="type", "Zone"="id", "Nom"="name")
+  
+
+inventory_total<-dim(full_inventory)[1]
+print(inventory_total)
+
+n_species<-unique(full_inventory$espece) %>% length
+print(n_species)
+
+```
+
+Rapport des inventaires à Chambly, QC
+
+
+# Récapitulatif de l'inventaire
+
+Pour guider les inventaires prévus dans la ville de Chambly de mai à août 2023, le présent document interactif permet de visualiser les relevés déjà effectués. De plus, nous indiquons les zones prioritaires qui seront ciblées pour l'inventaire de la semaine suivante.
+
+Les données présentées sont préliminaires et seront encore affinées avant la clôture du mandat. La géolocalisation des arbres n'a pas encore été corrigée pour la majorité d'entre eux et ne doit pas être considérée comme définitive.
+
+Jusqu'à présent, un total de 1824 arbres ont été inventoriés, comprenant 99 espèces différentes.
+
+La carte interactive ci-dessous offre une visualisation des arbres inventoriés, des zones ciblées pour l'inventaire (emprise et parcs) ainsi que des zones prioritaires pour la semaine suivante. En cliquant sur chaque polygone, vous pourrez afficher des informations spécifiques à chaque zone ou arbre.
+
+Pour la semaine prochaine, nous avons identifié trois zones prioritaires dans les districts d'Antoine-Louis-Fréchette et Louis-Franquet. Ces zones seront ciblées lors de l'inventaire pour recueillir des informations supplémentaires sur les arbres présents. Veuillez consulter la carte interactive pour plus de détails sur ces zones spécifiques.
+
+```{r carte_inventaire,  echo=FALSE}
+
+leaflet(data = tree_inventory, width = "100%") %>%
+  addProviderTiles(providers$Esri.WorldImagery) %>%
+  setView(lng = centroid_inventory[1], lat = centroid_inventory[2], zoom = 14)  %>%
+  addPolygons(data=priorities,
+              fillColor = "#ff9e17", weight = 1, smoothFactor = 0.5,
+              opacity = 0.3, fillOpacity = 0.5, stroke=TRUE, color="black",
+              group="Zones prioritaires") %>%
+  addLabelOnlyMarkers(data = centers,
+                      lng = ~X, lat = ~Y, label = ~subdistrict,
+                      labelOptions = labelOptions(noHide = TRUE, 
+                                                  direction = 'top', 
+                                                  textOnly = TRUE,
+                      style = list(
+                        "font-size" = "16px",
+                        "font-style" = "bold",
+                        "color" = "white"
+                      )
+                      )
+                      ) %>%
+  addPolygons(data=emprise,
+              color = "#cf8b8f", weight = 1, smoothFactor = 0.5,
+              opacity = 0.3, fillOpacity = 0.5, stroke=FALSE,
+              group="Emprise",
+              popup = ~htmlEscape(LBPA_ODO)) %>%
+  addPolygons(data=parcs,
+              color = "#4759d6", weight = 1, smoothFactor = 0.5,
+              opacity = 0.3, fillOpacity = 0.5, stroke=FALSE,
+              group="Parcs",
+              popup = ~htmlEscape(NomParc)) %>%
+  addCircleMarkers(radius = 4,
+                   color = "#72e76f",
+                   stroke = FALSE, fillOpacity = 0.8,
+                   group="Inventaire") %>%
+  addLayersControl(
+    overlayGroups = c("Inventaire", "Parcs", "Emprise", "Zones prioritaires"),
+    options = layersControlOptions(collapsed = FALSE))
+
+
+```
+
+Tel que convenu lors de notre consultation avec la Ville, nous accorderons une priorité particulière aux boulevards et aux parcs lors des prochains inventaires. Les boulevards et parcs suivants ont été sélectionnés comme zones d'inventaire pour la semaine prochaine :
+
+```{r table_high_priority,  echo=FALSE}
+
+DT::datatable(high_priority, caption = "Zones prioritaires",
+              options = list(
+  language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/French.json'),
+  pageLength = 5),
+              rownames= FALSE)
+
+```
+
+Finalement, nous attendons l'approbation des rues et avenues suivantes avant de procéder à l'inventaire des arbres qui se trouvent dans leur emprise publique. 
+
+```{r table_low_priority,  echo=FALSE}
+
+DT::datatable(low_priority, caption = "Zones en attendant",
+              options = list(
+  language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/French.json'),
+  pageLength = 5),
+          rownames= FALSE)
+
+```
+
+
+Finalement, nous avons relevé les cas suivants pour lesquels nous ne sommes pas certains de la manière de procéder avec l'inventaire. Vos conseils à ce sujet seraient appréciés.
+
+![Image 1: Emprises qui chevauche les propriétés privées](.photos/20230602_photo1.png)
+
+![Image 2: Emprises qui chevauche les propriétés privées](.photos/20230602_photo2.png)
+
+
+![Image 3: Emprise manquante](.photos/20230602_photo3.png)
+
+
+Nous vous contacterons au cours de la semaine si nous remarquons d'autres enjeux.
+
+Veuillez nous communiquer la meilleure stratégie pour procéder à l'inventaire des emprises publiques ainsi que la manière de traiter les enjeux soulignés dans les plus brefs délais.
+
+Merci ! 
+
+</div>
